@@ -1,0 +1,8 @@
+#! /bin/bash
+
+status=$(zmpkg.pl status)
+
+if ["$status" = "stopped"]
+then
+  service zoneminder start
+fi
