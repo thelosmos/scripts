@@ -4,7 +4,7 @@
 # Depends on Chromium being installed
 
 while read line; 
-    do filename=$(echo $line | grep -iPo '[^/\\&\?]+\.\w{3,4}(?=([\?&].*$|$))' | sed 's/htm/pdf/'); 
+    do filename=$(echo $line | grep -iPo [^/]*$ | sed 's/$/.pdf/'); 
         chromium --headless  --print-to-pdf=$filename $line;
 done  
 
