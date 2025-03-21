@@ -5,6 +5,6 @@
 
 while read line; 
     do filename=$(echo $line | grep -iPo [^/]*$ | sed 's/$/.pdf/'); 
-        chromium --headless  --print-to-pdf=$filename $line;
+        chromium --headless  --run-all-compositor-stages-before-draw --print-to-pdf=$filename $line;
 done  
 
