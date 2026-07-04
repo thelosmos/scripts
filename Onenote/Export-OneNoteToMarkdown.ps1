@@ -194,21 +194,83 @@ function Get-StyleMarkdownPrefix {
     return ""
 }
 
+function Get-OneNoteEmbeddedData {
+    param($Node, [hashtable]$Ns)
+    if (-not $Node) { return $null }
+
+    $nodesToInspect = New-Object System.Collections.Generic.List[object]
+    $nodesToInspect.Add($Node)
+
+    try {
+        $descendants = $Node.SelectNodes('.//*[local-name()="Data" or local-name()="BinaryData" or local-name()="FileData"]')
+        if ($descendants) {
+            foreach ($descendant in $descendants) {
+                $nodesToInspect.Add($descendant)
+            }
+        }
+    } catch {
+        # Fall back to a simple child-walk if the XPath form is unsupported.
+    }
+
+    foreach ($candidateNode in $nodesToInspect) {
+        if (-not $candidateNode) { continue }
+
+        $candidateValues = @()
+        foreach ($attrName in @('data', 'binaryData', 'fileData', 'value', 'content', 'src')) {
+            try {
+                $attribute = $candidateNode.Attributes[$attrName]
+                if ($attribute -and -not [string]::IsNullOrWhiteSpace($attribute.Value)) {
+                    $candidateValues += $attribute.Value
+                }
+            } catch {
+                # Ignore attributes that are not present.
+            }
+        }
+
+        try {
+            if (-not [string]::IsNullOrWhiteSpace($candidateNode.InnerText)) {
+                $candidateValues += $candidateNode.InnerText
+            }
+        } catch {
+            # Ignore nodes without a usable InnerText value.
+        }
+
+        foreach ($candidate in $candidateValues) {
+            $trimmed = $candidate.Trim()
+            if ([string]::IsNullOrWhiteSpace($trimmed)) { continue }
+
+            $normalized = $trimmed -replace '\s', ''
+            if ($normalized -match '^data:[^;]+;base64,(.+)$') {
+                $normalized = $Matches[1]
+            }
+
+            if ($normalized -match '^[A-Za-z0-9+/=]+$' -and $normalized.Length -ge 4 -and ($normalized.Length % 4) -eq 0) {
+                return $normalized
+            }
+        }
+    }
+
+    return $null
+}
+
+function Convert-OneNoteBase64Payload {
+    param([string]$Payload)
+    if ([string]::IsNullOrWhiteSpace($Payload)) { return $null }
+
+    $normalized = ($Payload -replace '\s', '')
+    if ($normalized -match '^data:[^;]+;base64,(.+)$') {
+        $normalized = $Matches[1]
+    }
+    return $normalized
+}
+
 # --------------------------------------------------------------------------
 # IMAGE HANDLING
 # --------------------------------------------------------------------------
 function Export-OneNoteImage {
     param($ImageNode, [hashtable]$Ns, [string]$AssetsDir, [string]$PageTitle, [ref]$Counter)
 
-    $dataNode = Get-XmlNode -ContextNode $ImageNode -XPath "one:Data" -Ns $Ns
-    if (-not $dataNode) {
-        $dataNode = Get-XmlNode -ContextNode $ImageNode -XPath "one:BinaryData" -Ns $Ns
-    }
-    if (-not $dataNode) {
-        $dataNode = Get-XmlNode -ContextNode $ImageNode -XPath "one:FileData" -Ns $Ns
-    }
-
-    $rawData = if ($dataNode) { $dataNode.InnerText } else { $null }
+    $rawData = Get-OneNoteEmbeddedData -Node $ImageNode -Ns $Ns
     if ([string]::IsNullOrWhiteSpace($rawData)) {
         return "*[image: no embedded data found]*"
     }
@@ -218,7 +280,8 @@ function Export-OneNoteImage {
 
     try {
         if (-not (Test-Path $AssetsDir)) { New-Item -ItemType Directory -Path $AssetsDir -Force | Out-Null }
-        $bytes = [Convert]::FromBase64String($rawData)
+        $normalizedData = Convert-OneNoteBase64Payload -Payload $rawData
+        $bytes = [Convert]::FromBase64String($normalizedData)
         [System.IO.File]::WriteAllBytes((Join-Path $AssetsDir $fileName), $bytes)
         $assetsFolderName = Split-Path $AssetsDir -Leaf
         return "![image]($assetsFolderName/$fileName)"
@@ -230,15 +293,7 @@ function Export-OneNoteImage {
 function Export-OneNoteAttachment {
     param($AttachmentNode, [hashtable]$Ns, [string]$AssetsDir, [string]$PageTitle, [ref]$Counter)
 
-    $dataNode = Get-XmlNode -ContextNode $AttachmentNode -XPath "one:Data" -Ns $Ns
-    if (-not $dataNode) {
-        $dataNode = Get-XmlNode -ContextNode $AttachmentNode -XPath "one:BinaryData" -Ns $Ns
-    }
-    if (-not $dataNode) {
-        $dataNode = Get-XmlNode -ContextNode $AttachmentNode -XPath "one:FileData" -Ns $Ns
-    }
-
-    $rawData = if ($dataNode) { $dataNode.InnerText } else { $null }
+    $rawData = Get-OneNoteEmbeddedData -Node $AttachmentNode -Ns $Ns
     if ([string]::IsNullOrWhiteSpace($rawData)) {
         return "*[attachment: no embedded data found]*"
     }
@@ -262,7 +317,8 @@ function Export-OneNoteAttachment {
 
     try {
         if (-not (Test-Path $AssetsDir)) { New-Item -ItemType Directory -Path $AssetsDir -Force | Out-Null }
-        $bytes = [Convert]::FromBase64String($rawData)
+        $normalizedData = Convert-OneNoteBase64Payload -Payload $rawData
+        $bytes = [Convert]::FromBase64String($normalizedData)
         [System.IO.File]::WriteAllBytes((Join-Path $AssetsDir $fileName), $bytes)
         $assetsFolderName = Split-Path $AssetsDir -Leaf
         $displayNameSafe = Get-SafeFileName $displayName
@@ -519,4 +575,6 @@ function Main {
     Write-Host "`nDone. Markdown files written under: $outputRoot"
 }
 
-Main
+if ($MyInvocation.InvocationName -ne '.') {
+    Main
+}
