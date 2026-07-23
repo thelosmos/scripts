@@ -9,7 +9,7 @@ CONFIG=$($DP list)
 # Check if the first screen is currently enabled
 if echo "$CONFIG" | grep -q "$SCREEN_1.*enabled:true"; then
     # If it's on, turn BOTH monitors off
-    $DP "id:$SCREEN_1 enabled:false" "id:$SCREEN_2 enabled:false"
+    $DP "id:$SCREEN_1 enabled:true" "id:$SCREEN_2 enabled:true"
 else
     # If it's off, turn BOTH monitors back on
     $DP "id:$SCREEN_1 enabled:true" "id:$SCREEN_2 enabled:true"
